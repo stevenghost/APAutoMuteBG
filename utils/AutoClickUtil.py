@@ -13,6 +13,7 @@ import win32ui
 from injector import singleton, inject
 
 from utils.ConfigUtil import ConfigUtil
+from utils.HotkeyUtil import parse_hotkey, key_down, modifiers_match
 from utils.PathUtil import resource_path
 from utils.LoggerUtil import LoggerUtil
 
@@ -118,7 +119,11 @@ class AutoClickUtil:
         self.overlay_stop_misses = max(1, int(cfg["overlay_stop_misses"]))
         self.overlay_click_interval = float(cfg["overlay_click_interval"])
         self.hotkey = str(cfg["hotkey"])
+        self._hotkey_parsed = parse_hotkey(self.hotkey)
+        self._hotkey_was_down = False
         self.paused = threading.Event()
+        if self._hotkey_parsed is None:
+            self.logger.warning("Invalid hotkey spec: %s", self.hotkey)
 
         self.template = self._load_template()
         self.overlay_template = self._load_overlay_template()
@@ -175,6 +180,19 @@ class AutoClickUtil:
         hwnd = self._find_window()
         return bool(hwnd and self._is_foreground(hwnd))
 
+    def _poll_hotkey(self):
+        """轮询按键状态：只在目标进程前台时生效，不安装任何全局钩子。"""
+        if not self._hotkey_parsed:
+            return
+        mods, vk = self._hotkey_parsed
+        if not self.is_target_foreground():
+            self._hotkey_was_down = False
+            return
+        down = key_down(vk) and modifiers_match(mods)
+        if down and not self._hotkey_was_down:
+            self.toggle_pause()
+        self._hotkey_was_down = down
+
     # ---------- 主循环 ----------
     def run(self):
         if not self.enabled:
@@ -185,6 +203,10 @@ class AutoClickUtil:
             self.process_name, self.interval, self.click_interval, self.threshold)
 
         while not self.event.is_set():
+            try:
+                self._poll_hotkey()
+            except Exception:
+                self.logger.exception("Hotkey polling failed")
             if self.paused.is_set():
                 time.sleep(self.interval)
                 continue
@@ -506,6 +528,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 

@@ -32,48 +32,7 @@ NIF_INFO = 0x10
 WM_TRAY = win32con.WM_APP + 1
 MENU_ID_BASE = 1000
 
-WH_KEYBOARD_LL = 13
-WM_KEYDOWN = 0x0100
-WM_SYSKEYDOWN = 0x0104
 
-
-class KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("vkCode", ctypes.c_ulong),
-        ("scanCode", ctypes.c_ulong),
-        ("flags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.c_void_p),
-    ]
-
-
-HOTKEY_ID = 1
-
-
-def parse_hotkey(spec):
-    """把 "F12" / "Ctrl+Shift+F12" 解析成 (modifiers, vk)，失败返回 None。"""
-    if not spec:
-        return None
-    mods = 0
-    vk = None
-    for part in str(spec).upper().replace(' ', '').split('+'):
-        if part in ('CTRL', 'CONTROL'):
-            mods |= win32con.MOD_CONTROL
-        elif part == 'ALT':
-            mods |= win32con.MOD_ALT
-        elif part == 'SHIFT':
-            mods |= win32con.MOD_SHIFT
-        elif part in ('WIN', 'WINDOWS'):
-            mods |= win32con.MOD_WIN
-        elif part.startswith('F') and part[1:].isdigit():
-            n = int(part[1:])
-            if 1 <= n <= 24:
-                vk = 0x70 + n - 1
-        elif len(part) == 1 and part.isalnum():
-            vk = ord(part)
-        else:
-            return None
-    return (mods, vk) if vk is not None else None
 
 
 def _open_site():
@@ -87,18 +46,12 @@ class TrayIcon:
     ChangeWindowMessageFilterEx 报 WinError 5 导致托盘线程退出的问题。
     """
 
-    def __init__(self, icon_path, tooltip, menu_items, logger=None,
-                 hotkey_spec=None, hotkey_callback=None, hotkey_gate=None):
+    def __init__(self, icon_path, tooltip, menu_items, logger=None):
         self.icon_path = icon_path
         self.tooltip = tooltip
         self.menu_items = menu_items  # [(文本或返回文本的函数, 回调[, 是否勾选函数]), ...]
         self.logger = logger
-        self.hotkey_spec = hotkey_spec
-        self.hotkey_callback = hotkey_callback
-        self.hotkey_gate = hotkey_gate
-        self._hotkey_registered = False
-        self._ll_hook = None
-        self._ll_callback = None
+
         self.hwnd = None
         self.hicon = None
         self._class_name = "AutoMuteBGTrayWindow"
@@ -173,61 +126,6 @@ class TrayIcon:
         if not self.hicon:
             raise RuntimeError(f"LoadImage failed: {self.icon_path}")
 
-        parsed = parse_hotkey(self.hotkey_spec)
-        if parsed:
-            try:
-                win32gui.RegisterHotKey(self.hwnd, HOTKEY_ID, parsed[0], parsed[1])
-                self._hotkey_registered = True
-                if self.logger:
-                    self.logger.info("Hotkey registered: %s", self.hotkey_spec)
-            except Exception as exc:
-                if self.logger:
-                    self.logger.warning("RegisterHotKey(%s) failed: %s", self.hotkey_spec, exc)
-                # 键被别的程序占用时，改用低级键盘钩子，功能相同
-                self._install_ll_hook(parsed)
-
-    def _mods_match(self, mods):
-        user32 = ctypes.windll.user32
-
-        def down(vk):
-            return bool(user32.GetAsyncKeyState(vk) & 0x8000)
-
-        if bool(mods & win32con.MOD_CONTROL) != down(0x11):
-            return False
-        if bool(mods & win32con.MOD_SHIFT) != down(0x10):
-            return False
-        if bool(mods & win32con.MOD_ALT) != down(0x12):
-            return False
-        return True
-
-    def _install_ll_hook(self, parsed):
-        """RegisterHotKey 失败时的兜底：全局低级键盘钩子。"""
-        mods, vk = parsed
-        hookproc = ctypes.WINFUNCTYPE(
-            ctypes.c_long, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p)
-
-        def proc(n_code, w_param, l_param):
-            try:
-                if n_code >= 0 and w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                    kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-                    if kb.vkCode == vk and self._mods_match(mods):
-                        if self.hotkey_gate is None or self.hotkey_gate():
-                            if self.hotkey_callback:
-                                self.hotkey_callback()
-                            return 1
-            except Exception:
-                if self.logger:
-                    self.logger.exception("Low-level hotkey handler failed")
-            return ctypes.windll.user32.CallNextHookEx(None, n_code, w_param, l_param)
-
-        self._ll_callback = hookproc(proc)
-        self._ll_hook = ctypes.windll.user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._ll_callback, None, 0)
-        if self._ll_hook:
-            if self.logger:
-                self.logger.info("Hotkey fallback installed (low-level hook): %s", self.hotkey_spec)
-        elif self.logger:
-            self.logger.warning("SetWindowsHookEx(WH_KEYBOARD_LL) failed")
 
     def _add_icon(self):
         nid = (self.hwnd, 0, NIF_ICON | NIF_MESSAGE | NIF_TIP,
@@ -302,28 +200,9 @@ class TrayIcon:
         if msg == self._taskbar_created:
             self._add_icon()
             return 0
-        if msg == win32con.WM_HOTKEY and wparam == HOTKEY_ID:
-            if self.hotkey_gate is None or self.hotkey_gate():
-                if self.hotkey_callback:
-                    try:
-                        self.hotkey_callback()
-                    except Exception:
-                        if self.logger:
-                            self.logger.exception("Hotkey callback failed")
-            return 0
+
         if msg == win32con.WM_CLOSE:
-            if self._ll_hook:
-                try:
-                    ctypes.windll.user32.UnhookWindowsHookEx(self._ll_hook)
-                except Exception:
-                    pass
-                self._ll_hook = None
-            if self._hotkey_registered:
-                try:
-                    win32gui.UnregisterHotKey(hwnd, HOTKEY_ID)
-                except Exception:
-                    pass
-                self._hotkey_registered = False
+
             win32gui.Shell_NotifyIcon(NIM_DELETE, (hwnd, 0))
             win32gui.DestroyWindow(hwnd)
             return 0
@@ -384,9 +263,6 @@ class StrayUtil:
                 ("退出", self.exit_app),
             ],
             logger=self.logger,
-            hotkey_spec=auto_click_util.hotkey,
-            hotkey_callback=self._toggle_skip,
-            hotkey_gate=auto_click_util.is_target_foreground,
         )
 
     @staticmethod
@@ -467,6 +343,7 @@ class StrayUtil:
         VolumeGuard.restore_all(self.logger)
         self.event.set()
         self.tray.stop()
+
 
 
 
