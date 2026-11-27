@@ -63,7 +63,7 @@ DEFAULTS = {
     "max_click_seconds": 30,  # 单轮连点最长时间；按钮一直不消失就放弃本轮
     "stop_misses": 6,         # 连续多少次检测不到才算"按钮消失"（0.1s/次 ≈ 0.6s）
     "cooldown": 0.2,          # 一轮连点结束后的冷却（秒）
-    "max_blue_shift": 30,     # 区域内 B-R 均值超过它判为蓝色特效，不算按钮
+    "max_blue_shift": 25,     # 字形亮像素的 B-R 均值超过它判为蓝色光效，不算按钮
     "overlay_x": 1720,        # 遮罩上「跳过剧情」按钮中心
     "overlay_y": 1078,
     "overlay_threshold": 0.70,
@@ -274,9 +274,14 @@ class AutoClickUtil:
         if score < self.threshold:
             return False
 
-        # 只在匹配到的 64x64 圆形区域内统计颜色，避免背景干扰
-        diff = (b - r)[dy:dy + size, dx:dx + size]
-        blue_shift = float(diff[self.mask].mean())
+        # 只统计圆形区域内"字形亮像素"的颜色，背景再蓝也不影响判断
+        patch_gray = gray[dy:dy + size, dx:dx + size]
+        bright = (patch_gray > 200) & self.mask
+        if int(bright.sum()) >= 10:
+            patch_diff = (b - r)[dy:dy + size, dx:dx + size]
+            blue_shift = float(patch_diff[bright].mean())
+        else:
+            blue_shift = 0.0
         self._last_blue = blue_shift
         if blue_shift > self.max_blue_shift:
             self._log_color_reject(score, blue_shift)
@@ -441,6 +446,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 
