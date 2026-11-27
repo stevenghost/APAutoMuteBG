@@ -14,6 +14,7 @@ import win32security
 from injector import singleton, inject
 
 from utils import VolumeGuard
+from utils.AutoClickUtil import AutoClickUtil
 from utils.ConfigUtil import ConfigUtil
 from utils.PathUtil import resource_path
 from utils.GetProcessUtil import get_all_audio_sessions, get_all_window_processes
@@ -32,6 +33,35 @@ WM_TRAY = win32con.WM_APP + 1
 MENU_ID_BASE = 1000
 
 
+HOTKEY_ID = 1
+
+
+def parse_hotkey(spec):
+    """把 "F12" / "Ctrl+Shift+F12" 解析成 (modifiers, vk)，失败返回 None。"""
+    if not spec:
+        return None
+    mods = 0
+    vk = None
+    for part in str(spec).upper().replace(' ', '').split('+'):
+        if part in ('CTRL', 'CONTROL'):
+            mods |= win32con.MOD_CONTROL
+        elif part == 'ALT':
+            mods |= win32con.MOD_ALT
+        elif part == 'SHIFT':
+            mods |= win32con.MOD_SHIFT
+        elif part in ('WIN', 'WINDOWS'):
+            mods |= win32con.MOD_WIN
+        elif part.startswith('F') and part[1:].isdigit():
+            n = int(part[1:])
+            if 1 <= n <= 24:
+                vk = 0x70 + n - 1
+        elif len(part) == 1 and part.isalnum():
+            vk = ord(part)
+        else:
+            return None
+    return (mods, vk) if vk is not None else None
+
+
 def _open_site():
     webbrowser.open('https://github.com/stevenghost/APAutoMuteBG')
 
@@ -43,11 +73,16 @@ class TrayIcon:
     ChangeWindowMessageFilterEx 报 WinError 5 导致托盘线程退出的问题。
     """
 
-    def __init__(self, icon_path, tooltip, menu_items, logger=None):
+    def __init__(self, icon_path, tooltip, menu_items, logger=None,
+                 hotkey_spec=None, hotkey_callback=None, hotkey_gate=None):
         self.icon_path = icon_path
         self.tooltip = tooltip
-        self.menu_items = menu_items  # [(文本, 回调), ...]
+        self.menu_items = menu_items  # [(文本或返回文本的函数, 回调[, 是否勾选函数]), ...]
         self.logger = logger
+        self.hotkey_spec = hotkey_spec
+        self.hotkey_callback = hotkey_callback
+        self.hotkey_gate = hotkey_gate
+        self._hotkey_registered = False
         self.hwnd = None
         self.hicon = None
         self._class_name = "AutoMuteBGTrayWindow"
@@ -122,6 +157,17 @@ class TrayIcon:
         if not self.hicon:
             raise RuntimeError(f"LoadImage failed: {self.icon_path}")
 
+        parsed = parse_hotkey(self.hotkey_spec)
+        if parsed:
+            try:
+                win32gui.RegisterHotKey(self.hwnd, HOTKEY_ID, parsed[0], parsed[1])
+                self._hotkey_registered = True
+                if self.logger:
+                    self.logger.info("Hotkey registered: %s", self.hotkey_spec)
+            except Exception as exc:
+                if self.logger:
+                    self.logger.warning("RegisterHotKey(%s) failed: %s", self.hotkey_spec, exc)
+
     def _add_icon(self):
         nid = (self.hwnd, 0, NIF_ICON | NIF_MESSAGE | NIF_TIP,
                WM_TRAY, self.hicon, self.tooltip)
@@ -195,7 +241,22 @@ class TrayIcon:
         if msg == self._taskbar_created:
             self._add_icon()
             return 0
+        if msg == win32con.WM_HOTKEY and wparam == HOTKEY_ID:
+            if self.hotkey_gate is None or self.hotkey_gate():
+                if self.hotkey_callback:
+                    try:
+                        self.hotkey_callback()
+                    except Exception:
+                        if self.logger:
+                            self.logger.exception("Hotkey callback failed")
+            return 0
         if msg == win32con.WM_CLOSE:
+            if self._hotkey_registered:
+                try:
+                    win32gui.UnregisterHotKey(hwnd, HOTKEY_ID)
+                except Exception:
+                    pass
+                self._hotkey_registered = False
             win32gui.Shell_NotifyIcon(NIM_DELETE, (hwnd, 0))
             win32gui.DestroyWindow(hwnd)
             return 0
@@ -206,8 +267,12 @@ class TrayIcon:
 
     def _show_menu(self):
         menu = win32gui.CreatePopupMenu()
-        for index, (text, _) in enumerate(self.menu_items):
-            win32gui.AppendMenu(menu, win32con.MF_STRING, MENU_ID_BASE + index, text)
+        for index, item in enumerate(self.menu_items):
+            text = item[0]() if callable(item[0]) else item[0]
+            flags = win32con.MF_STRING
+            if len(item) > 2 and callable(item[2]) and item[2]():
+                flags |= win32con.MF_CHECKED
+            win32gui.AppendMenu(menu, flags, MENU_ID_BASE + index, text)
 
         x, y = win32gui.GetCursorPos()
         # 先置前，否则点击空白处菜单不会消失
@@ -232,9 +297,11 @@ class TrayIcon:
 @singleton
 class StrayUtil:
     @inject
-    def __init__(self, config_util: ConfigUtil, logger_util: LoggerUtil, event: threading.Event):
+    def __init__(self, config_util: ConfigUtil, logger_util: LoggerUtil,
+                 event: threading.Event, auto_click_util: AutoClickUtil):
         self.setup_msg = config_util.config["setting"]["setup_msg"]
         self.config_util = config_util
+        self.auto_click_util = auto_click_util
         self.logger = logger_util.logger
         self.event = event
 
@@ -243,12 +310,16 @@ class StrayUtil:
             icon_path=icon_path,
             tooltip="后台静音",
             menu_items=[
+                (self._skip_menu_text, self._toggle_skip, self._skip_checked),
                 ("关于", self.show_version_info),
                 ("开源地址", _open_site),
                 ("进程列表", self._save_process_list_to_txt),
                 ("退出", self.exit_app),
             ],
             logger=self.logger,
+            hotkey_spec=auto_click_util.hotkey,
+            hotkey_callback=self._toggle_skip,
+            hotkey_gate=auto_click_util.is_target_foreground,
         )
 
     @staticmethod
@@ -270,6 +341,20 @@ class StrayUtil:
 
         self.logger.info("Starting stray.")
         threading.Thread(target=self.tray.run, args=(on_ready,), name="StrayThread").start()
+
+    def _skip_menu_text(self):
+        return "剧情自动跳过：开" if not self.auto_click_util.is_paused() else "剧情自动跳过：关"
+
+    def _skip_checked(self):
+        return not self.auto_click_util.is_paused()
+
+    def _toggle_skip(self):
+        # 只在配置的目标进程处于前台时响应（热键和菜单都走这里）
+        if not self.auto_click_util.is_target_foreground():
+            self.logger.info("Skip toggle ignored: target process is not foreground.")
+            return
+        enabled = self.auto_click_util.toggle_pause()
+        self.logger.info("Skip auto-click is now %s.", "ON" if enabled else "OFF")
 
     def _save_process_list_to_txt(self):
         filename = "process_name.txt"
@@ -315,6 +400,8 @@ class StrayUtil:
         VolumeGuard.restore_all(self.logger)
         self.event.set()
         self.tray.stop()
+
+
 
 
 

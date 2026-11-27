@@ -58,6 +58,7 @@
   | 参数 | 默认值 | 说明 |
   | --- | --- | --- |
   | `enabled` | `true` | 是否启用自动跳过 |
+| `hotkey` | `F12` | 暂停/恢复自动跳过的热键（支持 `F1`~`F24`、字母数字、`Ctrl+Alt+Shift+Win` 组合）；仅当目标进程在前台时生效，也可在托盘右键菜单里切换 |
   | `process` | `AzurPromilia.exe` | 目标进程名 |
   | `interval` | `0.1` | 按钮检测间隔（秒） |
   | `click_interval` | `0.1` | 命中后连点间隔（秒） |
@@ -118,6 +119,7 @@ cd tools/AutoMuteBG
 - 部分环境下 `Shell_NotifyIcon` 可能失败导致**托盘图标不显示**（日志中有 `Tray diagnostics` 行），此时程序仍在运行，可通过任务管理器结束。
 - 自签名发布者的 exe 在其他电脑上会显示"未知发布者"；SmartScreen 是否拦截取决于文件来源与信誉。
 - ~~有时会忘记自己还在打游戏~~。
+
 
 
 

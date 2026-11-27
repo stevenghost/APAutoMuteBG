@@ -18,6 +18,7 @@ processes:
 # 剧情界面「>>」按钮自动点击（2560x1440 下实测位置）
 auto_click:
   enabled: true
+  hotkey: F12            # 暂停/恢复自动跳过的热键（仅目标进程在前台时生效）
   process: AzurPromilia.exe
   interval: 0.1          # 检测间隔（秒）
   click_interval: 0.1    # 命中后连点间隔（秒）
@@ -25,13 +26,19 @@ auto_click:
   center_x: 2408         # 按钮中心（客户区坐标）
   center_y: 61
   search: 3              # 匹配滑动半径（像素）
-  # 剧情梗概遮罩上的「跳过剧情」按钮
-  max_click_seconds: 30
+  max_blue_shift: 25     # 字形亮像素 B-R 超过它判为蓝色光效
+  stop_misses: 6         # 连续多少次检测不到才算按钮消失
+  cooldown: 0.2          # 一轮连点结束后的冷却（秒）
+  max_click_seconds: 30  # 单轮连点最长时间
+
+  # 剧情梗概遮罩
   overlay_x: 1720
   overlay_y: 1078
-  overlay_threshold: 0.70
+  overlay_threshold: 0.65
   overlay_search: 4
-  overlay_max_seconds: 15
+  overlay_max_seconds: 5
+  overlay_stop_misses: 10
   overlay_click_interval: 0.1
-
-
+  overlay_marker_threshold: 0.70
+  overlay_marker_x: 850
+  overlay_marker_y: 1055

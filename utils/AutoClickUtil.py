@@ -71,6 +71,7 @@ DEFAULTS = {
     "overlay_max_seconds": 5,  # 遮罩连点最长时间
     "overlay_stop_misses": 10, # 遮罩连续多少次检测不到才算消失（0.1s/次 ≈ 1s）
     "overlay_click_interval": 0.1,
+    "hotkey": "F12",          # 暂停/恢复自动跳过的热键（仅目标进程在前台时生效）
     "overlay_marker_threshold": 0.70,  # 「继续观看」按钮作为遮罩存在的判据
     "overlay_marker_x": 850,           # 「继续观看」按钮中心
     "overlay_marker_y": 1055,
@@ -116,6 +117,8 @@ class AutoClickUtil:
         self.overlay_max_seconds = float(cfg["overlay_max_seconds"])
         self.overlay_stop_misses = max(1, int(cfg["overlay_stop_misses"]))
         self.overlay_click_interval = float(cfg["overlay_click_interval"])
+        self.hotkey = str(cfg["hotkey"])
+        self.paused = threading.Event()
 
         self.template = self._load_template()
         self.overlay_template = self._load_overlay_template()
@@ -155,6 +158,23 @@ class AutoClickUtil:
         cy = cx = (size - 1) / 2.0
         return ((xx - cx) ** 2 + (yy - cy) ** 2) <= radius ** 2
 
+    # ---------- 暂停控制 ----------
+    def is_paused(self):
+        return self.paused.is_set()
+
+    def toggle_pause(self):
+        if self.paused.is_set():
+            self.paused.clear()
+            self.logger.info("AutoClick resumed.")
+        else:
+            self.paused.set()
+            self.logger.info("AutoClick paused.")
+        return not self.paused.is_set()
+
+    def is_target_foreground(self):
+        hwnd = self._find_window()
+        return bool(hwnd and self._is_foreground(hwnd))
+
     # ---------- 主循环 ----------
     def run(self):
         if not self.enabled:
@@ -165,6 +185,9 @@ class AutoClickUtil:
             self.process_name, self.interval, self.click_interval, self.threshold)
 
         while not self.event.is_set():
+            if self.paused.is_set():
+                time.sleep(self.interval)
+                continue
             try:
                 hwnd = self._find_window()
                 if hwnd and self._is_foreground(hwnd):
@@ -369,6 +392,8 @@ class AutoClickUtil:
         misses = 0
         start = time.time()
         while not self.event.is_set():
+            if self.paused.is_set():
+                return True
             if not win32gui.IsWindow(hwnd) or not self._is_foreground(hwnd):
                 return True
             if not self._overlay_present(hwnd):
@@ -446,6 +471,8 @@ class AutoClickUtil:
         start = time.time()
         try:
             while not self.event.is_set():
+                if self.paused.is_set():
+                    return
                 if not win32gui.IsWindow(hwnd) or not self._is_foreground(hwnd):
                     return
                 if self._overlay_present(hwnd, 0):
@@ -474,6 +501,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 
