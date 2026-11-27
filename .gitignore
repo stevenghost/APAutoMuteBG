@@ -11,3 +11,5 @@ __pycache__/
 *.exe.spec
 /logs/
 /process_name.txt
+gh_token.txt
+
