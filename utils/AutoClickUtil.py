@@ -163,7 +163,6 @@ class AutoClickUtil:
                             "Skip button detected (score=%.3f, blue=%.0f), clicking.",
                             self._last_score, self._last_blue)
                         self._click_until_gone(hwnd)
-                        time.sleep(0.3)
                         self._handle_overlay(hwnd)
                         time.sleep(self.cooldown)
             except Exception as exc:
@@ -333,13 +332,13 @@ class AutoClickUtil:
     def _handle_overlay(self, hwnd):
         """遮罩出现后持续点「跳过剧情」，直到遮罩消失。"""
         appeared = False
-        for _ in range(5):
+        for _ in range(10):
             if self.event.is_set():
                 return False
             if self._overlay_present(hwnd):
                 appeared = True
                 break
-            time.sleep(0.2)
+            time.sleep(0.1)
         if not appeared:
             return False
 
@@ -427,6 +426,9 @@ class AutoClickUtil:
             while not self.event.is_set():
                 if not win32gui.IsWindow(hwnd) or not self._is_foreground(hwnd):
                     return
+                if self._overlay_present(hwnd, 0):
+                    self.logger.info("Overlay appeared, stop clicking skip button.")
+                    return
                 if not self._button_present(hwnd):
                     misses += 1
                     if misses >= self.stop_misses:
@@ -436,9 +438,6 @@ class AutoClickUtil:
                         return
                 else:
                     misses = 0
-                    if self._overlay_present(hwnd, 0):
-                        self.logger.info("Overlay appeared, stop clicking skip button.")
-                        return
                     elapsed = time.time() - start
                     if self.max_click_seconds and elapsed > self.max_click_seconds:
                         self.logger.warning(
@@ -453,6 +452,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 
