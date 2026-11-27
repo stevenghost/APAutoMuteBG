@@ -5,6 +5,7 @@ from pycaw.utils import AudioSession
 
 from utils.ConfigUtil import ConfigUtil
 from utils.LoggerUtil import LoggerUtil
+from utils import VolumeGuard
 from utils.ProcessUtil import ProcessUtil
 
 
@@ -36,6 +37,10 @@ class AudioUtil:
 
         # 运行函数
         self._check_fg_volume()
+
+        # 记录原始音量，程序退出时统一恢复
+        self.original_volume = float(self.config["fg_volume"])
+        VolumeGuard.register(session.ProcessId, session, self.original_volume)
 
     def _check_fg_volume(self):
         if self.config["fg_volume"] == "auto":
@@ -92,5 +97,10 @@ class AudioUtil:
             time.sleep(self.config["loop_interval"])
         else:
             self.stop_easing_thread = True
-            self.session.SimpleAudioVolume.SetMasterVolume(self.config["fg_volume"], None)
+            try:
+                self.session.SimpleAudioVolume.SetMasterVolume(self.config["fg_volume"], None)
+            except Exception:
+                pass
+            VolumeGuard.unregister(self.session.ProcessId)
             self.logger.info("Exiting loop.")
+

@@ -13,6 +13,7 @@ import win32process
 import win32security
 from injector import singleton, inject
 
+from utils import VolumeGuard
 from utils.ConfigUtil import ConfigUtil
 from utils.PathUtil import resource_path
 from utils.GetProcessUtil import get_all_audio_sessions, get_all_window_processes
@@ -311,8 +312,10 @@ class StrayUtil:
 
     def exit_app(self):
         self.logger.info("Exiting by StrayUtil.")
+        VolumeGuard.restore_all(self.logger)
         self.event.set()
         self.tray.stop()
+
 
 
 

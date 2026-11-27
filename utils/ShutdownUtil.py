@@ -6,6 +6,7 @@ import win32con
 import win32gui
 from injector import singleton, inject
 
+from utils import VolumeGuard
 from utils.LoggerUtil import LoggerUtil
 from utils.PIDLockUtil import PIDLockUtil
 from utils.StrayUtil import StrayUtil
@@ -29,6 +30,7 @@ class ShutdownUtil:
             self.logger.warn(f"Received WM_QUERYENDSESSION. {h_wnd, u_msg, w_param, l_param}")
         elif u_msg == win32con.WM_ENDSESSION:
             self.logger.warn("Received WM_ENDSESSION. System is shutting down.")
+            VolumeGuard.restore_all(self.logger)
             self.stray_util.exit_app()
             self.lock_util.remove_lock()
             while threading.active_count() > 2:
@@ -78,3 +80,4 @@ class ShutdownUtil:
             self.destroy_hidden_window()
         except Exception as e:
             self.logger.error(e, exc_info=True, stack_info=True)
+

@@ -1,3 +1,4 @@
+import atexit
 import ctypes
 import sys
 import threading
@@ -8,6 +9,7 @@ import win32con
 from injector import Injector, singleton
 
 from utils.AutoClickUtil import AutoClickUtil
+from utils import VolumeGuard
 from utils.LoggerUtil import LoggerUtil
 from utils.PIDLockUtil import PIDLockUtil
 from utils.ShutdownUtil import ShutdownUtil
@@ -67,6 +69,8 @@ def main():
     except Exception:
         pass
 
+    atexit.register(VolumeGuard.restore_all, injector.get(LoggerUtil).logger)
+
     stray_util = injector.get(StrayUtil)
     stray_util.run_detached()
 
@@ -106,6 +110,11 @@ if __name__ == '__main__':
         # 窗口模式下看不到 traceback，落盘一份便于排查
         import traceback
         try:
+            from utils import VolumeGuard
+            VolumeGuard.restore_all()
+        except Exception:
+            pass
+        try:
             with open("crash.log", "a", encoding="utf-8") as fh:
                 traceback.print_exc(file=fh)
         except Exception:
@@ -115,4 +124,6 @@ if __name__ == '__main__':
 # 打包用
 print(pywintypes)
 # pyinstaller -Fw --add-data "resource/;resource/" -i "resource/mute.ico" -n background_muter.exe main.py
+
+
 
