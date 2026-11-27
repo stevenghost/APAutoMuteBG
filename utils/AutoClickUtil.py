@@ -261,8 +261,13 @@ class AutoClickUtil:
 
     @staticmethod
     def _is_foreground(hwnd):
-        fg = win32gui.GetForegroundWindow()
-        return fg == hwnd or win32gui.GetAncestor(fg, win32con.GA_ROOT) == hwnd
+        try:
+            fg = win32gui.GetForegroundWindow()
+            if not fg:
+                return False
+            return fg == hwnd or win32gui.GetAncestor(fg, win32con.GA_ROOT) == hwnd
+        except Exception:
+            return False
 
     # ---------- 截图 ----------
     def _grab_gray(self, hwnd, left, top, width, height):
@@ -501,6 +506,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 

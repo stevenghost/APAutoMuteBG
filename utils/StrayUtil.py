@@ -32,6 +32,20 @@ NIF_INFO = 0x10
 WM_TRAY = win32con.WM_APP + 1
 MENU_ID_BASE = 1000
 
+WH_KEYBOARD_LL = 13
+WM_KEYDOWN = 0x0100
+WM_SYSKEYDOWN = 0x0104
+
+
+class KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", ctypes.c_ulong),
+        ("scanCode", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.c_void_p),
+    ]
+
 
 HOTKEY_ID = 1
 
@@ -83,6 +97,8 @@ class TrayIcon:
         self.hotkey_callback = hotkey_callback
         self.hotkey_gate = hotkey_gate
         self._hotkey_registered = False
+        self._ll_hook = None
+        self._ll_callback = None
         self.hwnd = None
         self.hicon = None
         self._class_name = "AutoMuteBGTrayWindow"
@@ -167,6 +183,51 @@ class TrayIcon:
             except Exception as exc:
                 if self.logger:
                     self.logger.warning("RegisterHotKey(%s) failed: %s", self.hotkey_spec, exc)
+                # 键被别的程序占用时，改用低级键盘钩子，功能相同
+                self._install_ll_hook(parsed)
+
+    def _mods_match(self, mods):
+        user32 = ctypes.windll.user32
+
+        def down(vk):
+            return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+        if bool(mods & win32con.MOD_CONTROL) != down(0x11):
+            return False
+        if bool(mods & win32con.MOD_SHIFT) != down(0x10):
+            return False
+        if bool(mods & win32con.MOD_ALT) != down(0x12):
+            return False
+        return True
+
+    def _install_ll_hook(self, parsed):
+        """RegisterHotKey 失败时的兜底：全局低级键盘钩子。"""
+        mods, vk = parsed
+        hookproc = ctypes.WINFUNCTYPE(
+            ctypes.c_long, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p)
+
+        def proc(n_code, w_param, l_param):
+            try:
+                if n_code >= 0 and w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                    kb = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+                    if kb.vkCode == vk and self._mods_match(mods):
+                        if self.hotkey_gate is None or self.hotkey_gate():
+                            if self.hotkey_callback:
+                                self.hotkey_callback()
+                            return 1
+            except Exception:
+                if self.logger:
+                    self.logger.exception("Low-level hotkey handler failed")
+            return ctypes.windll.user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+        self._ll_callback = hookproc(proc)
+        self._ll_hook = ctypes.windll.user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, self._ll_callback, None, 0)
+        if self._ll_hook:
+            if self.logger:
+                self.logger.info("Hotkey fallback installed (low-level hook): %s", self.hotkey_spec)
+        elif self.logger:
+            self.logger.warning("SetWindowsHookEx(WH_KEYBOARD_LL) failed")
 
     def _add_icon(self):
         nid = (self.hwnd, 0, NIF_ICON | NIF_MESSAGE | NIF_TIP,
@@ -251,6 +312,12 @@ class TrayIcon:
                             self.logger.exception("Hotkey callback failed")
             return 0
         if msg == win32con.WM_CLOSE:
+            if self._ll_hook:
+                try:
+                    ctypes.windll.user32.UnhookWindowsHookEx(self._ll_hook)
+                except Exception:
+                    pass
+                self._ll_hook = None
             if self._hotkey_registered:
                 try:
                     win32gui.UnregisterHotKey(hwnd, HOTKEY_ID)
@@ -400,6 +467,8 @@ class StrayUtil:
         VolumeGuard.restore_all(self.logger)
         self.event.set()
         self.tray.stop()
+
+
 
 
 
