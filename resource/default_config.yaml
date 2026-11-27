@@ -1,0 +1,37 @@
+setting:
+  bg_scan_interval: 1
+  max_log_files: 5
+  setup_msg: true
+
+default:
+  loop_interval: 0.2
+  fg_volume: 1
+  bg_volume: 0
+  ignore: [ ]
+  easing:
+    duration: 0.5
+    steps: 50
+
+processes:
+  AzurPromilia.exe: null
+
+# 剧情界面「>>」按钮自动点击（2560x1440 下实测位置）
+auto_click:
+  enabled: true
+  process: AzurPromilia.exe
+  interval: 0.1          # 检测间隔（秒）
+  click_interval: 0.1    # 命中后连点间隔（秒）
+  threshold: 0.75        # NCC 匹配阈值
+  center_x: 2408         # 按钮中心（客户区坐标）
+  center_y: 61
+  search: 3              # 匹配滑动半径（像素）
+  # 剧情梗概遮罩上的「跳过剧情」按钮
+  max_click_seconds: 30
+  overlay_x: 1720
+  overlay_y: 1078
+  overlay_threshold: 0.70
+  overlay_search: 4
+  overlay_max_seconds: 15
+  overlay_click_interval: 0.1
+
+
