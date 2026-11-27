@@ -68,9 +68,12 @@ DEFAULTS = {
     "overlay_y": 1078,
     "overlay_threshold": 0.65,
     "overlay_search": 4,
-    "overlay_max_seconds": 30, # 遮罩连点最长时间
+    "overlay_max_seconds": 5,  # 遮罩连点最长时间
     "overlay_stop_misses": 10, # 遮罩连续多少次检测不到才算消失（0.1s/次 ≈ 1s）
     "overlay_click_interval": 0.1,
+    "overlay_marker_threshold": 0.70,  # 「继续观看」按钮作为遮罩存在的判据
+    "overlay_marker_x": 850,           # 「继续观看」按钮中心
+    "overlay_marker_y": 1055,
 }
 
 
@@ -116,6 +119,10 @@ class AutoClickUtil:
 
         self.template = self._load_template()
         self.overlay_template = self._load_overlay_template()
+        self.overlay_marker = self._load_overlay_marker()
+        self.overlay_marker_threshold = float(cfg["overlay_marker_threshold"])
+        self.overlay_marker_x = int(cfg["overlay_marker_x"])
+        self.overlay_marker_y = int(cfg["overlay_marker_y"])
         self.mask = self._build_mask(self.template.shape[0])
         self._hwnd = None
         self._last_score = 0.0
@@ -134,6 +141,11 @@ class AutoClickUtil:
     @staticmethod
     def _load_overlay_template():
         path = resource_path("resource/azur_skip_story.npy")
+        return np.load(path).astype(np.float32)
+
+    @staticmethod
+    def _load_overlay_marker():
+        path = resource_path("resource/azur_overlay_marker.npy")
         return np.load(path).astype(np.float32)
 
     @staticmethod
@@ -291,22 +303,32 @@ class AutoClickUtil:
         return True
 
     # ---------- 遮罩（剧情梗概）----------
-    def _overlay_present(self, hwnd, search=None):
-        tpl = self.overlay_template
+    def _match_at(self, hwnd, center_x, center_y, tpl, search):
         h, w = tpl.shape
-        s = self.overlay_search if search is None else search
+        s = search
         region_w, region_h = w + 2 * s, h + 2 * s
-        left = self.overlay_x - region_w // 2
-        top = self.overlay_y - region_h // 2
-
+        left = center_x - region_w // 2
+        top = center_y - region_h // 2
         grabbed = self._grab_gray(hwnd, left, top, region_w, region_h)
         if not grabbed:
-            return False
+            return -1.0
         gray, _, _ = grabbed
         if float(gray.mean()) < 1.0:
-            return False
-        self._last_overlay_score = self._ncc_generic(gray, tpl, s)
-        return self._last_overlay_score >= self.overlay_threshold
+            return -1.0
+        return self._ncc_generic(gray, tpl, s)
+
+    def _overlay_present(self, hwnd, search=None):
+        s = self.overlay_search if search is None else search
+        skip_score = self._match_at(
+            hwnd, self.overlay_x, self.overlay_y, self.overlay_template, s)
+        if skip_score >= self.overlay_threshold:
+            self._last_overlay_score = skip_score
+            return True
+        marker_score = self._match_at(
+            hwnd, self.overlay_marker_x, self.overlay_marker_y,
+            self.overlay_marker, s)
+        self._last_overlay_score = max(skip_score, marker_score)
+        return marker_score >= self.overlay_marker_threshold
 
     @staticmethod
     def _ncc_generic(region, template, search):
@@ -452,6 +474,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 
