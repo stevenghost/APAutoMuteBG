@@ -69,9 +69,10 @@
   | `cooldown` | `0.2` | 一轮连点结束后的冷却（秒） |
   | `max_click_seconds` | `30` | 单轮连点最长时间，防止误判死循环 |
   | `overlay_x` / `overlay_y` | `1720` / `1078` | 遮罩上「跳过剧情」按钮中心（2560×1440） |
-  | `overlay_threshold` | `0.70` | 「跳过剧情」按钮的匹配阈值 |
+  | `overlay_threshold` | `0.65` | 「跳过剧情」按钮的匹配阈值 |
   | `overlay_search` | `4` | 遮罩按钮的滑动搜索半径 |
-  | `overlay_max_seconds` | `15` | 遮罩连点最长时间 |
+  | `overlay_max_seconds` | `30` | 遮罩连点最长时间 |
+| `overlay_stop_misses` | `10` | 遮罩连续多少次检测不到才算消失（0.1s/次 ≈ 1s 容错） |
   | `overlay_click_interval` | `0.1` | 遮罩连点间隔（秒） |
 
 ### 分辨率适配
@@ -115,5 +116,6 @@ cd tools/AutoMuteBG
 - 部分环境下 `Shell_NotifyIcon` 可能失败导致**托盘图标不显示**（日志中有 `Tray diagnostics` 行），此时程序仍在运行，可通过任务管理器结束。
 - 自签名发布者的 exe 在其他电脑上会显示"未知发布者"；SmartScreen 是否拦截取决于文件来源与信誉。
 - ~~有时会忘记自己还在打游戏~~。
+
 
 

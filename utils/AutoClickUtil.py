@@ -66,9 +66,10 @@ DEFAULTS = {
     "max_blue_shift": 25,     # 字形亮像素的 B-R 均值超过它判为蓝色光效，不算按钮
     "overlay_x": 1720,        # 遮罩上「跳过剧情」按钮中心
     "overlay_y": 1078,
-    "overlay_threshold": 0.70,
+    "overlay_threshold": 0.65,
     "overlay_search": 4,
-    "overlay_max_seconds": 15, # 遮罩连点最长时间
+    "overlay_max_seconds": 30, # 遮罩连点最长时间
+    "overlay_stop_misses": 10, # 遮罩连续多少次检测不到才算消失（0.1s/次 ≈ 1s）
     "overlay_click_interval": 0.1,
 }
 
@@ -110,6 +111,7 @@ class AutoClickUtil:
         self.overlay_threshold = float(cfg["overlay_threshold"])
         self.overlay_search = int(cfg["overlay_search"])
         self.overlay_max_seconds = float(cfg["overlay_max_seconds"])
+        self.overlay_stop_misses = max(1, int(cfg["overlay_stop_misses"]))
         self.overlay_click_interval = float(cfg["overlay_click_interval"])
 
         self.template = self._load_template()
@@ -120,6 +122,7 @@ class AutoClickUtil:
         self._last_near_log = 0.0
         self._last_blue = 0.0
         self._last_color_log = 0.0
+        self._last_overlay_score = 0.0
         self._click_pos_logged = False
 
     # ---------- 初始化 ----------
@@ -303,7 +306,8 @@ class AutoClickUtil:
         gray, _, _ = grabbed
         if float(gray.mean()) < 1.0:
             return False
-        return self._ncc_generic(gray, tpl, s) >= self.overlay_threshold
+        self._last_overlay_score = self._ncc_generic(gray, tpl, s)
+        return self._last_overlay_score >= self.overlay_threshold
 
     @staticmethod
     def _ncc_generic(region, template, search):
@@ -348,15 +352,18 @@ class AutoClickUtil:
                 return True
             if not self._overlay_present(hwnd):
                 misses += 1
-                if misses >= self.stop_misses:
-                    self.logger.info("Overlay gone after %d clicks.", clicks)
+                if misses >= self.overlay_stop_misses:
+                    self.logger.info(
+                        "Overlay gone after %d clicks (score=%.3f).",
+                        clicks, self._last_overlay_score)
                     return True
             else:
                 misses = 0
                 elapsed = time.time() - start
                 if elapsed > self.overlay_max_seconds:
                     self.logger.warning(
-                        "Overlay still detected after %.1fs, give up.", elapsed)
+                        "Overlay still detected after %.1fs (%d clicks, score=%.3f), give up.",
+                        elapsed, clicks, self._last_overlay_score)
                     return True
                 self._click(hwnd, self.overlay_x, self.overlay_y)
                 clicks += 1
@@ -446,6 +453,8 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
+
 
 
 
