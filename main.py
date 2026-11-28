@@ -1,3 +1,9 @@
+import os
+
+# 必须在任何 numpy 导入之前设置：OpenBLAS 默认按 CPU 核心数预留线程缓冲，
+# 会占用数百 MB 提交内存（实测 500MB -> 约 20MB）。
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 import atexit
 import ctypes
 import sys
@@ -124,6 +130,7 @@ if __name__ == '__main__':
 # 打包用
 print(pywintypes)
 # pyinstaller -Fw --add-data "resource/;resource/" -i "resource/mute.ico" -n background_muter.exe main.py
+
 
 
 

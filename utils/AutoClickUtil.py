@@ -1,7 +1,11 @@
 import ctypes
+import os
 import threading
 import time
 from ctypes import wintypes
+
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np
 import psutil
@@ -444,26 +448,35 @@ class AutoClickUtil:
         return True
 
     def _ncc(self, region):
-        """向量化的归一化互相关，返回 (best_score, dy, dx)。"""
+        """逐个偏移计算归一化互相关，返回 (best_score, dy, dx)。
+
+        不用 sliding_window_view：那种写法每次会临时分配数 MB 数组，
+        10Hz 下会让工作集缓慢上涨；逐个偏移只产生 64x64 的小临时量。
+        """
         template = self.template
         mask = self.mask
         size = template.shape[0]
-        s = self.search
 
         t0 = (template - template[mask].mean()) * mask
         t_den = float(np.sqrt((t0 * t0).sum()))
         if t_den <= 0:
             return 0.0, 0, 0
 
-        windows = np.lib.stride_tricks.sliding_window_view(region, (size, size))
-        windows = windows[:2 * s + 1, :2 * s + 1]
-        p0 = windows - windows.mean(axis=(2, 3), keepdims=True)
-        num = (p0 * t0).sum(axis=(2, 3))
-        p_den = np.sqrt((p0 * p0 * mask).sum(axis=(2, 3))) * t_den
-        scores = np.divide(num, p_den, out=np.full_like(num, -1.0), where=p_den > 0)
-        idx = int(np.argmax(scores))
-        dy, dx = divmod(idx, scores.shape[1])
-        return float(scores[dy, dx]), dy, dx
+        best = -1.0
+        best_dy = best_dx = 0
+        for dy in range(0, 2 * self.search + 1):
+            for dx in range(0, 2 * self.search + 1):
+                patch = region[dy:dy + size, dx:dx + size]
+                p0 = patch - patch[mask].mean()
+                num = float((p0 * t0).sum())
+                p_den = float(np.sqrt((p0 * p0 * mask).sum()))
+                if p_den <= 0:
+                    continue
+                score = num / (p_den * t_den)
+                if score > best:
+                    best = score
+                    best_dy, best_dx = dy, dx
+        return best, best_dy, best_dx
 
     def _click(self, hwnd, x, y):
         sx, sy = win32gui.ClientToScreen(hwnd, (x, y))
@@ -528,6 +541,7 @@ class AutoClickUtil:
                 win32api.SetCursorPos(old_pos)
             except Exception:
                 pass
+
 
 
 
